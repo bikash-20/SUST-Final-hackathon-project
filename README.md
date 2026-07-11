@@ -4,7 +4,7 @@
 
 ---
 
-## Production Deployment (Judge-Accessible)
+## Production Deployment 
 
 A live, stateful cluster is already running. Reviewers can open the dashboard
 in a browser and exercise the engine end-to-end without cloning the repo.
