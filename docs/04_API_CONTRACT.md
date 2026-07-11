@@ -11,7 +11,7 @@ no transfer/blocking endpoint, and no automated fraud-decision endpoint.
 
 | Item | Runtime contract |
 |---|---|
-| Base path | `/v1` except `GET /healthz` |
+| Base path | `/v1` except `GET /health` and `GET /healthz` |
 | Content type | JSON; telemetry stream is `text/event-stream` |
 | Time | Timezone-aware ISO-8601 strings |
 | Providers | Exact allowlist: `bkash`, `nagad`, `rocket` |
@@ -25,14 +25,24 @@ and secret management.
 
 ## Health
 
+### `GET /health`
+
+```json
+{"ok": true}
+```
+
+This process-only liveness endpoint does not query PostgreSQL. It is suitable
+for a lightweight external uptime ping.
+
 ### `GET /healthz`
 
 ```json
 {"ok": true, "engine_running": true}
 ```
 
-`ok` is a live database probe. `engine_running` indicates that simulation
-workers are active.
+`ok` is a live database probe. A failed probe returns HTTP 503 so deployment
+health checks cannot accept a disconnected release. `engine_running` is
+informational because operators may intentionally stop the simulation.
 
 ## Simulation
 

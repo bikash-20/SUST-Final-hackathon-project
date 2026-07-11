@@ -82,43 +82,52 @@ Historical forecast context defaults to the last 30 simulated days and can be
 configured with `HISTORICAL_WINDOW_DAYS` (1–365). It enriches confidence metadata
 without replacing the live 12-minute EWMA or changing its original confidence.
 
-## Vercel and Railway deployment
+## Vercel and Render deployment
 
 This is an isolated monorepo. In Vercel, connect this GitHub repository and set
 the project **Root Directory** to `frontend`. Set `NEXT_PUBLIC_BACKEND_URL` to the
-public HTTPS domain of the Railway backend; Vercel then builds the Next.js app
-using `frontend/vercel.json` and proxies `/v1/*` to Railway.
+public HTTPS domain of the Render backend; Vercel then builds the Next.js app
+using `frontend/vercel.json` and proxies `/v1/*` to Render.
 
-In Railway, create a PostgreSQL service and a backend service from the same
-repository. Set the backend **Root Directory** to `backend` and the Config-as-Code
-path to `/backend/railway.toml`. Configure these backend variables using Railway
-references where available:
+The repository-root `render.yaml` is the preferred deployment path. It creates
+a PostgreSQL 16 database and a one-instance Docker web service, generates the
+four application-role secrets, runs the rerunnable migrations, starts uvicorn
+on Render's `$PORT`, and checks `/healthz`. During Blueprint creation, set
+`CORS_ALLOWED_ORIGINS` to the exact Vercel origin, for example
+`https://your-project.vercel.app` (no path or trailing slash).
+
+These are all backend variables. The Blueprint supplies them automatically;
+use the same list if configuring the Render dashboard by hand:
 
 ```text
-MIGRATION_DATABASE_URL=${{Postgres.DATABASE_URL}}
-DB_HOST=${{Postgres.PGHOST}}
-DB_PORT=${{Postgres.PGPORT}}
-DB_NAME=${{Postgres.PGDATABASE}}
+DATABASE_URL=<Render direct internal connection string>
+MIGRATION_DATABASE_URL=<same direct internal owner connection string>
 DB_APP_USER=app_shared
-DB_APP_PASSWORD=<generate-a-strong-secret>
+DB_APP_PASSWORD=<unique generated secret>
 DB_BKASH_USER=app_bkash
-DB_BKASH_PASSWORD=<generate-a-strong-secret>
+DB_BKASH_PASSWORD=<unique generated secret>
 DB_NAGAD_USER=app_nagad
-DB_NAGAD_PASSWORD=<generate-a-strong-secret>
+DB_NAGAD_PASSWORD=<unique generated secret>
 DB_ROCKET_USER=app_rocket
-DB_ROCKET_PASSWORD=<generate-a-strong-secret>
+DB_ROCKET_PASSWORD=<unique generated secret>
 DEMO_AGENT_ID=00000000-0000-0000-0000-000000000001
+ANOMALY_ALLOWLISTED_PROVIDERS=
 HISTORICAL_WINDOW_DAYS=30
+CORS_ALLOWED_ORIGINS=https://your-project.vercel.app
 ```
 
-The Railway pre-deploy command applies all rerunnable SQL migrations and rotates
-the application-role passwords to these secrets before a new release starts.
-Keep the backend at one replica: its queue, EWMA state, and deterministic clock
-are process-local by design. Railway checks `/healthz` before making it live.
+Use `connectionString`, never `connectionPoolString`, for migrations. If
+`DATABASE_URL` is omitted, local-style `DB_HOST`, `DB_PORT`, and `DB_NAME` are
+the supported alternative. Do not set `PORT`; Render supplies it. Keep the
+backend at one replica because its queue, EWMA state, broadcaster, and
+deterministic clock are process-local. An external monitor can request
+`GET /health` every 10 minutes; `/healthz` remains the database readiness
+check. Render's Free PostgreSQL instance expires after 30 days, so upgrade or
+replace it before the judged deployment exceeds that age.
 
 GitHub Actions runs database migrations twice, all backend tests, frontend
 type-check/lint/build, and a production backend container build. Vercel and
-Railway Git integrations then create deployments from commits that pass the
+Render Git integrations then create deployments from commits that pass the
 repository's required checks; enable the `Backend tests and migrations`,
 `Frontend quality and production build`, and `Backend container build` branch
 protection checks on `main`.

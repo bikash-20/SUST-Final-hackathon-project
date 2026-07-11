@@ -55,15 +55,27 @@ jobs:
           cache-dependency-path: backend/pyproject.toml
       - name: Install backend and test dependencies
         run: pip install ./backend pytest
+      - name: Create Render-like non-superuser migration owner
+        run: |
+          psql -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 \
+            -c "CREATE ROLE render_migrator LOGIN CREATEROLE PASSWORD 'render-migrator-test';"
+          psql -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 \
+            -c "ALTER DATABASE liquiguard_test OWNER TO render_migrator;"
       - name: Apply PostgreSQL migrations
+        env:
+          PGPASSWORD: render-migrator-test
         run: |
           for migration in backend/infra/*.sql; do
-            psql -h localhost -U postgres -d liquiguard_test -v ON_ERROR_STOP=1 -f "$migration"
+            psql -h localhost -U render_migrator -d liquiguard_test \
+              -v ON_ERROR_STOP=1 --single-transaction -f "$migration"
           done
       - name: Prove migrations are rerunnable
+        env:
+          PGPASSWORD: render-migrator-test
         run: |
           for migration in backend/infra/*.sql; do
-            psql -h localhost -U postgres -d liquiguard_test -v ON_ERROR_STOP=1 -f "$migration"
+            psql -h localhost -U render_migrator -d liquiguard_test \
+              -v ON_ERROR_STOP=1 --single-transaction -f "$migration"
           done
       - name: Run backend tests
         run: pytest -q backend/tests

@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
-from sqlalchemy.engine import URL
+from sqlalchemy.engine import URL, make_url
 from sqlalchemy.sql import text
 
 # --- Engine singleton ----------------------------------------------------
@@ -39,18 +39,47 @@ _provider_sessionmakers: dict[str, async_sessionmaker[AsyncSession]] = {}
 PROVIDERS: Final[tuple[str, ...]] = ("bkash", "nagad", "rocket")
 
 
+def _database_target() -> tuple[str, int, str]:
+    """Return the database host, port, and name for every scoped role.
+
+    Render exposes managed PostgreSQL as one ``DATABASE_URL``.  That URL's
+    owner credentials are deliberately *not* used by the application: only
+    its network location is reused, while ``_build_dsn`` and
+    ``_build_provider_dsn`` always inject their least-privilege role
+    credentials.  Local development can continue to use the individual
+    ``DB_HOST``/``DB_PORT``/``DB_NAME`` variables.
+    """
+    configured_url = os.getenv("DATABASE_URL", "").strip()
+    if configured_url:
+        try:
+            parsed = make_url(configured_url)
+        except Exception as exc:
+            raise ValueError("DATABASE_URL is not a valid database URL") from exc
+
+        if parsed.get_backend_name() not in {"postgres", "postgresql"}:
+            raise ValueError("DATABASE_URL must use a PostgreSQL scheme")
+        if not parsed.host:
+            raise ValueError("DATABASE_URL must include a host")
+        if not parsed.database:
+            raise ValueError("DATABASE_URL must include a database name")
+        return parsed.host, parsed.port or 5432, parsed.database
+
+    host = os.getenv("DB_HOST", "localhost")
+    port = int(os.getenv("DB_PORT", "5432"))
+    name = os.getenv("DB_NAME", "codex_demo")
+    return host, port, name
+
+
 def _build_dsn() -> URL:
     user = os.getenv("DB_APP_USER", "app_shared")
     pwd = os.getenv("DB_APP_PASSWORD", "change_me_shared")
-    host = os.getenv("DB_HOST", "localhost")
-    port = os.getenv("DB_PORT", "5432")
-    name = os.getenv("DB_NAME", "codex_demo")
+    host, port, name = _database_target()
     return URL.create(
         "postgresql+asyncpg",
         username=user,
         password=pwd,
         host=host,
-        port=int(port),
+        port=port,
         database=name,
     )
 
@@ -75,15 +104,13 @@ def _build_provider_dsn(provider_id: str) -> URL:
     prefix = provider.upper()
     user = os.getenv(f"DB_{prefix}_USER", f"app_{provider}")
     pwd = os.getenv(f"DB_{prefix}_PASSWORD", f"change_me_{provider}")
-    host = os.getenv("DB_HOST", "localhost")
-    port = os.getenv("DB_PORT", "5432")
-    name = os.getenv("DB_NAME", "codex_demo")
+    host, port, name = _database_target()
     return URL.create(
         "postgresql+asyncpg",
         username=user,
         password=pwd,
         host=host,
-        port=int(port),
+        port=port,
         database=name,
     )
 
@@ -178,7 +205,7 @@ async def provider_session_scope(
 
 
 async def ping() -> bool:
-    """Liveness probe used by /healthz."""
+    """Database readiness probe used by /healthz."""
     try:
         async with session_scope() as s:
             await s.execute(text("SELECT 1"))

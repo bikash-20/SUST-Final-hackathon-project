@@ -17,6 +17,7 @@ RUN pip install --no-cache-dir .
 
 COPY infra ./infra
 COPY scripts ./scripts
+RUN chmod +x ./scripts/start.sh
 
 RUN useradd --create-home --uid 10001 liquiguard \
     && chown -R liquiguard:liquiguard /app
@@ -24,4 +25,4 @@ USER liquiguard
 
 EXPOSE 8000
 
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD ["./scripts/start.sh"]

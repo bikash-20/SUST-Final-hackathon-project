@@ -59,12 +59,18 @@ BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'ledger_executor'
     ) THEN
-        CREATE ROLE ledger_executor NOLOGIN;
+        CREATE ROLE ledger_executor
+            NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE
+            NOREPLICATION NOBYPASSRLS;
     END IF;
-    ALTER ROLE ledger_executor
-        NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
 END
 $ledger_role$;
+
+-- PostgreSQL 16+ no longer gives a CREATEROLE user SET permission on roles
+-- it creates. Grant temporary membership so the migration can create and
+-- replace the SECURITY DEFINER function as its constrained NOLOGIN owner.
+-- The membership is revoked after the routine grants are configured.
+GRANT ledger_executor TO CURRENT_USER;
 
 -- ---------------------------------------------------------------------
 -- 2. Schemas (one per provider plus the shared physical-cash domain).
@@ -275,6 +281,12 @@ GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA bkash TO ledger_executor;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA nagad TO ledger_executor;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA rocket TO ledger_executor;
 
+-- Create the routine while acting as its final constrained owner. This is
+-- what makes CREATE OR REPLACE work on both the first run and every rerun
+-- without requiring the managed PostgreSQL owner to be a superuser.
+GRANT CREATE ON SCHEMA shared TO ledger_executor;
+SET ROLE ledger_executor;
+
 CREATE OR REPLACE FUNCTION shared.apply_provider_customer_transaction(
     p_transaction_id UUID,
     p_agent_id UUID,
@@ -458,11 +470,6 @@ $atomic_provider_transaction$;
 
 -- Owning the SECURITY DEFINER function with this constrained NOLOGIN role
 -- avoids executing application input with migration-superuser privileges.
-GRANT CREATE ON SCHEMA shared TO ledger_executor;
-ALTER FUNCTION shared.apply_provider_customer_transaction(
-    UUID, UUID, TEXT, TEXT, NUMERIC, TEXT, TEXT, TIMESTAMPTZ
-) OWNER TO ledger_executor;
-REVOKE CREATE ON SCHEMA shared FROM ledger_executor;
 REVOKE ALL PRIVILEGES
     ON FUNCTION shared.apply_provider_customer_transaction(
         UUID, UUID, TEXT, TEXT, NUMERIC, TEXT, TEXT, TIMESTAMPTZ
@@ -473,6 +480,9 @@ GRANT EXECUTE
         UUID, UUID, TEXT, TEXT, NUMERIC, TEXT, TEXT, TIMESTAMPTZ
     )
     TO app_shared;
+RESET ROLE;
+REVOKE CREATE ON SCHEMA shared FROM ledger_executor;
+REVOKE ledger_executor FROM CURRENT_USER;
 
 -- ---------------------------------------------------------------------
 -- 7. Least-privilege grants and explicit cross-provider denial.

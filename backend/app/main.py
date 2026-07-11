@@ -10,7 +10,8 @@ import os
 import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Response, status
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.infrastructure.database import close_database_connections, ping
 from app.simulation.simulation_engine import init_default_engine, get_engine
@@ -23,6 +24,18 @@ from app.api.routes_cases import router as cases_router
 log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)s %(name)s :: %(message)s")
+
+
+def _cors_origins() -> list[str]:
+    configured = os.getenv(
+        "CORS_ALLOWED_ORIGINS",
+        "http://localhost:3000,http://127.0.0.1:3000",
+    )
+    return [
+        origin.strip().rstrip("/")
+        for origin in configured.split(",")
+        if origin.strip()
+    ]
 
 
 @asynccontextmanager
@@ -46,9 +59,28 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    origins = _cors_origins()
+    if origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=origins,
+            allow_credentials=False,
+            allow_methods=["GET", "POST", "OPTIONS"],
+            allow_headers=["*"],
+        )
+
+    @app.get("/health")
+    async def health():
+        """Process-only liveness endpoint suitable for an external ping."""
+        return {"ok": True}
+
     @app.get("/healthz")
-    async def healthz():
-        return {"ok": await ping(), "engine_running": get_engine().is_running}
+    async def healthz(response: Response):
+        """Readiness endpoint used by Render's deploy health check."""
+        database_ok = await ping()
+        if not database_ok:
+            response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        return {"ok": database_ok, "engine_running": get_engine().is_running}
 
     app.include_router(simulation_router, prefix="/v1/simulation")
     app.include_router(telemetry_router, prefix="/v1/telemetry")
