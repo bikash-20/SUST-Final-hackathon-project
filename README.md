@@ -141,7 +141,7 @@ migration (CSS-variable-driven) means the same `bg-surface`, `text-ink`,
 `text-muted`, `border-border`, and `signal` classes drive both themes — the
 `dark:` class is no longer required anywhere in the codebase.
 
-## Live evidence panel (judge-auditable)
+## Live evidence panel 
 
 Ops Web mounts the **Live evidence** card as the bottom-most section of the
 cockpit; Agent Mobile mounts it as a compact, collapsed-by-default card with
