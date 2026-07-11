@@ -1,4 +1,40 @@
-# LiquiGuard — Multi-Provider Decision Support
+# LiquiGuard
+
+### Enterprise-Grade Multi-Provider Liquidity Monitoring & Anomaly Detection System
+
+---
+
+## Production Deployment (Judge-Accessible)
+
+A live, stateful cluster is already running. Reviewers can open the dashboard
+in a browser and exercise the engine end-to-end without cloning the repo.
+
+| Surface | URL | What you should see |
+|---|---|---|
+| Production UI dashboard | https://liquiguard-frontend.vercel.app/ | LiquiGuard shell with the live SSE stream bound to the production backend |
+| Engine health (SSE origin) | https://liquiguard-backend.onrender.com/healthz | `{"ok":true,"engine_running":true}` |
+| Backend REST root | https://liquiguard-backend.onrender.com/ | FastAPI instance (no route at `/` — use the endpoints below) |
+| OpenAPI explorer | https://liquiguard-backend.onrender.com/docs | Interactive Swagger UI for every `/v1/*` route |
+| Measured runtime evidence | https://liquiguard-backend.onrender.com/v1/metrics | p50/p95 processing latency, tick reliability, explanation coverage |
+| Live SSE stream | https://liquiguard-backend.onrender.com/v1/telemetry/stream | `text/event-stream` of `snapshot` then incremental events |
+| Snapshot payload | https://liquiguard-backend.onrender.com/v1/telemetry/snapshot | The same JSON the dashboard reads |
+
+Quick verification, in order, takes about 10 seconds:
+
+```bash
+curl https://liquiguard-backend.onrender.com/healthz
+# {"ok":true,"engine_running":true}
+
+curl https://liquiguard-backend.onrender.com/v1/telemetry/snapshot | head -c 400
+# {"agent_id":"...","sim_time":"...","historical_analytics":{"historical_window_days":60,"historical_transactions":...}}
+```
+
+The engine is real: rows commit into PostgreSQL continuously, the historical
+context layer re-reads those rows as its forecast dataset, and the SSE stream
+carries both `snapshot` and incremental events for every commit. There is no
+mock JSON, no fixture file, no offline replay.
+
+---
 
 A working, synthetic-data-only prototype for bKash presents SUST CSE Carnival
 2026. It keeps shared physical cash separate from the bKash, Nagad, and Rocket
@@ -417,11 +453,5 @@ A judge or auditor reviewing a payroll-week "anomaly" can immediately see: *the 
 
 ---
 
-### Live status
-
-- **Frontend (Vercel):** https://liquiguard-frontend.vercel.app/
-- **Backend (Render):** https://liquiguard-backend.onrender.com/
-- **Health:** `https://liquiguard-backend.onrender.com/healthz` → `{"ok":true,"engine_running":true}`
-- **OpenAPI explorer:** `https://liquiguard-backend.onrender.com/docs`
-- **Measured evidence:** `https://liquiguard-backend.onrender.com/v1/metrics`
-- **Live SSE stream:** `https://liquiguard-backend.onrender.com/v1/telemetry/stream`
+For the live cluster URLs and judge verification commands, see
+**Production Deployment (Judge-Accessible)** at the top of this README.
