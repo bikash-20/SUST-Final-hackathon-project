@@ -46,17 +46,19 @@ WITH raw AS (
            ) AS daily_rank
       FROM balance_points
 )
-SELECT count(*)                                   AS transaction_count,
+SELECT count(*)                                    AS transaction_count,
        avg(-delta_bdt) FILTER (WHERE delta_bdt < 0) AS average_outflow,
        avg(delta_bdt)  FILTER (WHERE delta_bdt > 0) AS average_inflow,
-       sum(delta_bdt)                              AS net_delta,
-       stddev_pop(abs(delta_bdt))                  AS amount_stddev,
-       avg(abs(delta_bdt))                         AS average_absolute_delta,
+       sum(delta_bdt)                                AS net_delta,
+       extract(epoch FROM (max(sim_time) - min(sim_time))) / 60.0
+                                                     AS span_minutes,
+       stddev_pop(abs(delta_bdt))                    AS amount_stddev,
+       avg(abs(delta_bdt))                           AS average_absolute_delta,
        (SELECT avg(balance_after)
-          FROM daily WHERE daily_rank = 1)          AS average_daily_balance,
+          FROM daily WHERE daily_rank = 1)            AS average_daily_balance,
        (SELECT balance_bdt
           FROM shared.shared_cash_ledger
-         WHERE agent_id = :agent_id)               AS current_balance
+         WHERE agent_id = :agent_id)                 AS current_balance
   FROM raw;`;
 
 const BDT = new Intl.NumberFormat("en-BD", { maximumFractionDigits: 0 });
