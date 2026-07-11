@@ -63,6 +63,9 @@ class HistoricalContext:
                 for provider in PROVIDERS
             },
             "as_of": self.as_of.isoformat(),
+            # Explicit cold-start flag: lets the frontend render
+            # "warming up" instead of treating zeros as real evidence.
+            "historical_has_evidence": shared.transaction_count > 0,
         }
 
 
@@ -107,7 +110,16 @@ class HistoricalAnalytics:
         days: int,
     ) -> HistoricalContext:
         cutoff = as_of - timedelta(days=days)
-        params = {"agent_id": agent_id, "cutoff": cutoff, "as_of": as_of}
+        # Hard cap the per-query aggregation row count.  500k is roughly
+        # 200x what the 60-day demo window produces, so the cap is invisible
+        # in practice but it bounds the unbounded preceding window so a
+        # long-lived instance can never regress into a table-sized sort.
+        params = {
+            "agent_id": agent_id,
+            "cutoff": cutoff,
+            "as_of": as_of,
+            "row_cap": 500_000,
+        }
         async with session_scope() as session:
             shared = (
                 await session.execute(
@@ -119,6 +131,8 @@ class HistoricalAnalytics:
                              WHERE agent_id = :agent_id
                                AND sim_time >= :cutoff
                                AND sim_time <= :as_of
+                             ORDER BY sim_time DESC, id DESC
+                             LIMIT :row_cap
                         ), balance_points AS (
                             SELECT id, sim_time,
                                    (SELECT balance_bdt
@@ -175,6 +189,8 @@ class HistoricalAnalytics:
                              WHERE agent_id = :agent_id
                                AND sim_time >= :cutoff
                                AND sim_time <= :as_of
+                             ORDER BY sim_time DESC, transaction_id DESC
+                             LIMIT :row_cap
                         ), ranked AS (
                             SELECT *,
                                    row_number() OVER (
