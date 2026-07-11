@@ -66,6 +66,44 @@ make scenario-d  # explicit coordination lifecycle demonstration
 Switch between Agent Mobile, Ops Web, and Risk Reviewer without reloading. The
 single SSE connection stays mounted at the application provider boundary.
 
+## Theme toggle (light / dark / system)
+
+The top-right of the shell carries a three-state theme button. Click cycles
+**light → dark → system → light**. The preference is persisted in
+`localStorage` under `liquiguard.theme`. `system` follows the OS via
+`prefers-color-scheme` and updates live when the OS flips. The inline
+`THEME_BOOT` script in `app/layout.tsx` applies the `dark` class to `<html>`
+before React hydrates, so there is no flash on reload.
+
+The dark palette is identical to the prior trading-terminal look; the light
+palette is the first time this surface has been offered in white. Token
+migration (CSS-variable-driven) means the same `bg-surface`, `text-ink`,
+`text-muted`, `border-border`, and `signal` classes drive both themes — the
+`dark:` class is no longer required anywhere in the codebase.
+
+## Live evidence panel (judge-auditable)
+
+Ops Web mounts the **Live evidence** card as the bottom-most section of the
+cockpit; Agent Mobile mounts it as a compact, collapsed-by-default card with
+a "Show evidence" toggle. The card reads live from the same `/v1/telemetry/
+snapshot` payload that drives every other card on the page. Nothing is
+hardcoded.
+
+| Field | Source | Purpose |
+|---|---|---|
+| `LAST EVENT ID` | SSE `last-event-id` cursor | Proves the connection is live and not a one-shot snapshot |
+| `SIM TIME` | `sim_time` of the most recent SSE event | Distinct from `AS OF` so reviewers see two independent timestamps |
+| `WINDOW` | `HISTORICAL_WINDOW_DAYS` | Window applied to the historical CTE |
+| `HAS EVIDENCE` | `historical_analytics.historical_has_evidence` | Cold-start databases report `false` and surface a "warming up" state |
+| `TRANSACTIONS` / `DRAIN / MIN` / `CONSISTENCY` / `AS OF` | `historical_analytics.shared_cash.*` | The aggregated rollup the CTE actually returned |
+| `HISTORICAL CTE — BACKEND SQL` | embedded copy of the `historical.shared_cash` CTE from `backend/app/domain/liquidity/historical_analytics.py` | Reviewers can diff this block against the backend file line-for-line |
+
+A `Copy SQL` button copies the embedded CTE to the clipboard; a separate
+copy of the JSON cursor (event id, sim time, last received at) lets
+reviewers paste the raw SSE state. The embedded CTE is updated whenever
+the backend CTE gains new columns, so the two stay semantically
+equivalent.
+
 ## Evidence and checks
 
 ```bash
