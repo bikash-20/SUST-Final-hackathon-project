@@ -1,0 +1,49 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { color-scheme: light; }
+
+html, body {
+  font-family: ui-sans-serif, system-ui, -apple-system, "Noto Sans Bengali",
+               "Hind Siliguri", "Segoe UI", Roboto, sans-serif;
+}
+
+body {
+  background:
+    radial-gradient(circle at 8% 0%, rgba(16, 185, 129, 0.08), transparent 28rem),
+    radial-gradient(circle at 92% 8%, rgba(109, 40, 217, 0.06), transparent 24rem),
+    #f8fafc;
+}
+
+::selection {
+  background: rgba(16, 185, 129, 0.22);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
+
+/* Degraded-mode outline + banner: anything inside .safe-fallback gets
+   a pulsing amber outline and a sticky banner. The class is toggled
+   by the SSE hook the moment confidence_score < 0.5. */
+.safe-fallback {
+  box-shadow: inset 0 0 0 3px rgb(245 158 11);
+  position: relative;
+  border-radius: 12px;
+}
+.safe-fallback > .safe-fallback-banner {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  background: rgb(254 243 199);
+  color: rgb(146 64 14);
+  border-bottom: 1px solid rgb(245 158 11);
+  padding: 8px 12px;
+  font-weight: 600;
+  text-align: center;
+}

@@ -1,0 +1,102 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend tests and migrations
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: liquiguard_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d liquiguard_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DB_HOST: localhost
+      DB_PORT: 5432
+      DB_NAME: liquiguard_test
+      DB_APP_USER: app_shared
+      DB_APP_PASSWORD: change_me_shared
+      DB_BKASH_USER: app_bkash
+      DB_BKASH_PASSWORD: change_me_bkash
+      DB_NAGAD_USER: app_nagad
+      DB_NAGAD_PASSWORD: change_me_nagad
+      DB_ROCKET_USER: app_rocket
+      DB_ROCKET_PASSWORD: change_me_rocket
+      PGPASSWORD: postgres
+      PYTHONPATH: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+      - name: Install backend and test dependencies
+        run: pip install ./backend pytest
+      - name: Apply PostgreSQL migrations
+        run: |
+          for migration in backend/infra/*.sql; do
+            psql -h localhost -U postgres -d liquiguard_test -v ON_ERROR_STOP=1 -f "$migration"
+          done
+      - name: Prove migrations are rerunnable
+        run: |
+          for migration in backend/infra/*.sql; do
+            psql -h localhost -U postgres -d liquiguard_test -v ON_ERROR_STOP=1 -f "$migration"
+          done
+      - name: Run backend tests
+        run: pytest -q backend/tests
+
+  frontend:
+    name: Frontend quality and production build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run build
+
+  backend-image:
+    name: Backend container build
+    runs-on: ubuntu-latest
+    needs: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: backend
+          push: false
+          tags: liquiguard-backend:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

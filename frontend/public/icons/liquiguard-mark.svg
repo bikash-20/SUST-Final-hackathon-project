@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">LiquiGuard</title>
+  <desc id="desc">A geometric shield containing the Bengali Taka symbol</desc>
+  <rect width="512" height="512" rx="112" fill="#0f172a"/>
+  <path d="M256 66 408 122v112c0 99-61 176-152 212C165 410 104 333 104 234V122L256 66Z" fill="#10b981"/>
+  <path d="M256 94 378 139v95c0 79-46 143-122 176-76-33-122-97-122-176v-95l122-45Z" fill="#ecfdf5"/>
+  <circle cx="256" cy="246" r="104" fill="#ffffff"/>
+  <text x="256" y="312" text-anchor="middle" font-family="Noto Sans Bengali, Hind Siliguri, sans-serif" font-size="190" font-weight="800" fill="#0f172a">৳</text>
+  <path d="M178 174h156" stroke="#10b981" stroke-width="18" stroke-linecap="round"/>
+</svg>

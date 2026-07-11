@@ -1,0 +1,17 @@
+.DS_Store
+.env
+.env.local
+.puku/
+.vscode/
+.pytest_cache/
+**/__pycache__/
+**/*.py[cod]
+backend/.venv/
+frontend/.next/
+frontend/node_modules/
+*.tsbuildinfo
+tmp/
+problem.pdf
+problem_extracted.txt
+problem_text.txt
+ocr_pdf.py
