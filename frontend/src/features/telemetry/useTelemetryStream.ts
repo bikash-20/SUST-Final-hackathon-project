@@ -304,6 +304,10 @@ function parseHistoricalAnalytics(value: unknown): HistoricalAnalyticsSummary | 
   return {
     ...shared,
     asOf: firstString(record, ["as_of"]) ?? "",
+    historicalHasEvidence:
+      typeof record.historical_has_evidence === "boolean"
+        ? record.historical_has_evidence
+        : shared.historicalTransactions > 0,
     providerSpecificAverages,
   };
 }

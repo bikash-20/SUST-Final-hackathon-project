@@ -52,6 +52,14 @@ export interface HistoricalPositionContext {
 
 export interface HistoricalAnalyticsSummary extends HistoricalPositionContext {
   asOf: string;
+  /**
+   * True when the historical layer has at least one transaction row inside
+   * the configured window. Cold-start databases report `false`, and the
+   * HistoricalContextCard surfaces a "warming up" state in that case.
+   * Optional for backward compatibility with snapshot payloads that pre-date
+   * this flag.
+   */
+  historicalHasEvidence?: boolean;
   providerSpecificAverages: Partial<
     Record<ProviderId, Omit<HistoricalPositionContext, "historicalWindowDays" | "liveHistoricalTrendSimilarity">>
   >;

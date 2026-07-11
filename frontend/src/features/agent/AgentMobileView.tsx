@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { AdvisoryCard } from "../advisory/AdvisoryCard";
+import { LiveEvidencePanel } from "../debug/LiveEvidencePanel";
 import { SafeFallbackLayout } from "../safety/SafeFallbackLayout";
 import { useRoleStore, type ProviderTab } from "../shell/roleStore";
 import { useTelemetryStore } from "../telemetry/useTelemetryStream";
@@ -16,17 +17,17 @@ const TAB_LABEL: Record<ProviderTab, string> = {
 const TAB_STYLE: Record<ProviderTab, { active: string; idle: string; dot: string }> = {
   bkash: {
     active: "border-bkash bg-bkash text-white shadow-lg shadow-pink-900/15",
-    idle: "border-pink-200 bg-white text-slate-900 hover:border-bkash",
+    idle: "border-border bg-surface text-ink hover:border-bkash",
     dot: "bg-bkash",
   },
   nagad: {
-    active: "border-nagad bg-nagad text-slate-950 shadow-lg shadow-orange-900/15",
-    idle: "border-orange-200 bg-white text-slate-900 hover:border-nagad",
+    active: "border-nagad bg-nagad text-base shadow-lg shadow-orange-900/15",
+    idle: "border-border bg-surface text-ink hover:border-nagad",
     dot: "bg-nagad",
   },
   rocket: {
     active: "border-rocket bg-rocket text-white shadow-lg shadow-purple-900/15",
-    idle: "border-purple-200 bg-white text-slate-900 hover:border-rocket",
+    idle: "border-border bg-surface text-ink hover:border-rocket",
     dot: "bg-rocket",
   },
 };
@@ -85,44 +86,49 @@ export function AgentMobileView() {
       <div className="mx-auto max-w-lg px-3 py-5 sm:px-5 sm:py-7">
         <div
           className={
-            "mb-4 flex items-center justify-between rounded-xl border px-3 py-2 text-xs font-semibold shadow-sm " +
+            "mb-4 flex items-center justify-between rounded-xl border px-3 py-2 text-xs font-semibold shadow-card " +
             (connectionState === "connected"
-              ? "border-emerald-200 bg-emerald-50/90 text-emerald-800"
-              : "border-amber-200 bg-amber-50/90 text-amber-900")
+              ? "border-emerald-700/40 bg-emerald-900/20 text-emerald-300"
+              : "border-signal/40 bg-signal-soft text-signal")
           }
         >
-          <span>
-            <span className="mr-2" aria-hidden>
-              {connectionState === "connected" ? "●" : "○"}
-            </span>
+          <span className="flex items-center gap-2">
+            <span
+              className={
+                "h-1.5 w-1.5 rounded-full " +
+                (connectionState === "connected" ? "bg-emerald-400" : "live-dot")
+              }
+              aria-hidden
+            />
             {connectionState === "connected" ? "Live telemetry" : "Telemetry reconnecting"}
           </span>
-          <code>{simTime ? new Date(simTime).toISOString().slice(11, 19) : "—"}</code>
+          <code className="num">{simTime ? new Date(simTime).toISOString().slice(11, 19) : "—"}</code>
         </div>
 
         <AdvisoryCard />
 
-        <section className="relative mt-4 overflow-hidden rounded-2xl bg-slate-950 p-5 text-white shadow-xl shadow-slate-900/15">
-          <div className="absolute -right-8 -top-12 h-32 w-32 rounded-full bg-emerald-400/15 blur-2xl" />
-          <div className="relative text-[11px] font-bold uppercase tracking-[0.14em] text-emerald-300">
+        <section className="relative mt-4 overflow-hidden rounded-2xl border border-border bg-surface p-5 text-ink shadow-card">
+          <div className="absolute -right-8 -top-12 h-32 w-32 rounded-full bg-emerald-500/10 blur-2xl" />
+          <div className="absolute inset-x-0 top-0 h-[2px] bg-signal" aria-hidden />
+          <div className="relative eyebrow">
             Shared physical cash drawer
           </div>
-          <div className="relative mt-2 text-3xl font-bold tracking-tight sm:text-4xl">
+          <div className="num relative mt-2 text-3xl font-bold tracking-tight sm:text-4xl text-ink">
             {balanceText(sharedCash)}
           </div>
-          <div className="relative mt-3 flex flex-wrap justify-between gap-2 text-[11px] text-slate-300">
+          <div className="num relative mt-3 flex flex-wrap justify-between gap-2 text-[11px] text-muted">
             <span>{freshnessText(sharedCash, now)}</span>
             <span>{confidenceText(sharedCash, confidence)}</span>
           </div>
           {degraded && (
-            <div className="mt-3 rounded-lg bg-amber-100 p-2 text-xs font-medium text-amber-950">
+            <div className="mt-3 rounded-lg border border-signal/40 bg-signal-soft p-2 text-xs font-medium text-signal">
               ⚠ ডেটা অনিশ্চিত — নতুন ক্যাশ-আউটের আগে অপারেশনস টিমের সাথে যাচাই করুন
             </div>
           )}
         </section>
 
         <section className="mt-5" aria-label="Provider e-money positions">
-          <div className="mb-2 text-[11px] font-bold uppercase tracking-[0.12em] text-slate-500">
+          <div className="eyebrow mb-2">
             Provider e-money — separate ledgers
           </div>
           <div className="grid grid-cols-3 gap-2">
@@ -136,7 +142,7 @@ export function AgentMobileView() {
                   onClick={() => setProvider(providerId)}
                   aria-pressed={active}
                   className={
-                    "min-w-0 rounded-2xl border px-2.5 py-3 text-left shadow-sm transition duration-200 " +
+                    "min-w-0 rounded-2xl border px-2.5 py-3 text-left shadow-card transition duration-200 " +
                     (active ? TAB_STYLE[providerId].active : TAB_STYLE[providerId].idle)
                   }
                 >
@@ -144,13 +150,13 @@ export function AgentMobileView() {
                     <span className={`h-2 w-2 rounded-full ${active ? "bg-white/80" : TAB_STYLE[providerId].dot}`} />
                     {TAB_LABEL[providerId]}
                   </span>
-                  <span className="mt-1 block truncate text-sm font-bold">
+                  <span className="num mt-1 block truncate text-sm font-bold">
                     {reading ? `৳${BDT.format(reading.balanceBdt)}` : "—"}
                   </span>
                   <span
                     className={
-                      "mt-1 block truncate text-[10px] " +
-                      (active ? "text-slate-300" : "text-slate-500")
+                      "num mt-1 block truncate text-[10px] " +
+                      (active ? "text-white/80" : "text-muted")
                     }
                   >
                     {freshnessText(reading, now)}
@@ -161,18 +167,19 @@ export function AgentMobileView() {
           </div>
         </section>
 
-        <section className="mt-5 rounded-2xl border border-slate-200/80 bg-white p-4 shadow-lg shadow-slate-900/5">
+        <section className="mt-5 rounded-2xl border border-border bg-surface p-4 shadow-card">
           <div className="mb-2 flex items-center justify-between">
-            <div className="text-[11px] font-bold uppercase tracking-[0.1em] text-slate-500">
+            <div className="eyebrow">
               Recent activity — {TAB_LABEL[provider]}
             </div>
-            <div className="text-[11px] text-slate-500">
+            <div className="num text-[11px] text-muted">
               {confidenceText(providerBalances[provider], confidence)}
             </div>
           </div>
-          <ul className="divide-y divide-slate-100 text-sm">
+          <LiveEvidencePanel variant="compact" />
+          <ul className="divide-y divide-border text-sm">
             {my.length === 0 && (
-              <li className="py-4 text-center text-slate-500">
+              <li className="num py-4 text-center text-muted">
                 No live transactions received yet.
               </li>
             )}
@@ -182,16 +189,17 @@ export function AgentMobileView() {
                 className="flex items-center justify-between gap-3 py-3"
               >
                 <div>
-                  <div className="font-medium">{transaction.counterpartyMsisdn}</div>
-                  <div className="text-[11px] text-slate-500">
+                  <div className="num font-medium text-ink">{transaction.counterpartyMsisdn}</div>
+                  <div className="num text-[11px] text-muted">
                     {new Date(transaction.simTime).toISOString().slice(11, 19)}
                   </div>
                 </div>
                 <div
                   className={
-                    transaction.direction === "out"
-                      ? "font-semibold text-rose-600"
-                      : "font-semibold text-emerald-700"
+                    "num font-semibold " +
+                    (transaction.direction === "out"
+                      ? "text-rose-400"
+                      : "text-emerald-400")
                   }
                 >
                   {transaction.direction === "out" ? "−" : "+"}৳
