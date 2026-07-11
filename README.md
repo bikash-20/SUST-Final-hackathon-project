@@ -44,6 +44,30 @@ without scenario labels; and routes important evidence into a human-owned case.
 The system never connects to a real wallet, moves funds, blocks an account, or
 makes a final fraud determination.
 
+## Installable shell (PWA)
+
+The frontend is a Progressive Web App. Reviewers can install it on any
+modern device and run it as a standalone window without the browser chrome.
+
+| Capability | Status |
+|---|---|
+| Web app manifest (`frontend/public/manifest.json`) | Present — `name`, `short_name`, `start_url`, `display: standalone`, theme color, 192/512 icons |
+| Manifest link in document `<head>` | Wired (`layout.tsx`) |
+| Apple touch icon (iOS home screen) | Wired (`layout.tsx`) |
+| `theme-color` follows light / dark | Wired — runtime viewport and manifest both follow the active theme |
+| Install banner inside the UI | Present (`features/install/InstallAppBanner.tsx`) — captures `beforeinstallprompt` on Chromium browsers and shows an explicit **Install** action |
+| Android / Chrome / Edge install | Supported via the in-app banner; opens the native install sheet |
+| iOS Safari "Add to Home Screen" | Supported — the same banner shows platform-aware instructions for the iOS flow (Share → Add to Home Screen) |
+| Desktop Chrome / Edge install | Supported via the same banner; produces a dock / taskbar icon |
+| Standalone window (no browser UI) | Supported — manifest declares `display: standalone` |
+| Offline shell caching | Not enabled — there is no service worker, so going offline after install will show the network error page. This is a deliberate scope choice for the prototype |
+| Push notifications | Not enabled — out of scope for this build |
+
+To install during judging: open the production dashboard
+(https://liquiguard-frontend.vercel.app/), wait for the in-app **Install**
+banner to appear, and click it. On a phone the browser's install sheet opens
+directly; on iOS the banner shows the Share → Add to Home Screen steps.
+
 ## Architecture
 
 ```text
