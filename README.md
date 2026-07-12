@@ -349,6 +349,344 @@ history where they differ from the runtime. Runnable source is under
 
 ---
 
+## Observability dashboard (metrics, health, logs)
+
+LiquiGuard treats observability as a first-class surface. There is no
+"console.log only" path; every layer publishes either a metric, a
+health probe, or a structured log line that an operator can grep.
+
+### Metrics — `GET /v1/metrics`
+
+The metrics endpoint is a measured, not synthesised, view of the running
+engine. Every number comes from the runtime collector
+(`backend/app/domain/metrics/collector.py`); missing or unobserved values
+return `null`, never zero.
+
+| Field                     | What it measures                                                |
+| ------------------------- | --------------------------------------------------------------- |
+| `processing_latency_ms`   | p50 / p95 / p99 wall-clock cost of one simulation tick          |
+| `tick_reliability`        | Ratio of `tick.done` to `tick.enqueued` over the sample window  |
+| `explanation_coverage`    | Fraction of alerts that carry explainable `transitions` JSON    |
+| `forecast_count`          | Number of EWMA forecasts produced since startup                 |
+| `dead_letter_count`       | Cumulative rows written to `shared.dead_letter_logs`            |
+| `coordination_alerts_*`   | Counters per FSM state (`PENDING` / `ACKNOWLEDGED` / `RESOLVED`) |
+| `historical_rows_scanned` | Rows examined by the 60-day CTE on the last historical payload  |
+| `historical_cache_hits`   | Per-minute cache hits in `_forecast_payload()`                  |
+
+Live dashboard (verified during the demo window):
+<https://liquiguard-backend.onrender.com/v1/metrics>
+
+Local verification:
+
+```bash
+curl -fsS http://localhost:8000/v1/metrics | python3 -m json.tool
+```
+
+### Health — `/healthz` and `/health`
+
+Two distinct probes; both are wired into Render's `render.yaml`.
+
+- `/healthz` is the **database-readiness** probe. It opens a session
+  against the `app_shared` role, runs `SELECT 1`, and returns
+  `{"ok": true, "engine_running": <bool>}` with HTTP 200 only when both
+  the connection and the simulation pump are alive. Render's Blueprint
+  uses this for the readiness gate during boot.
+- `/health` is the **liveness** probe. It returns 200 unconditionally as
+  long as the process is up and the FastAPI app is serving. External
+  monitors (e.g. a cron hitting the URL every 10 minutes) use this to
+  keep the Render free-tier instance warm.
+
+```bash
+curl https://liquiguard-backend.onrender.com/healthz
+# {"ok":true,"engine_running":true}
+```
+
+### Logs
+
+The FastAPI process emits structured log lines on stdout in
+`<timestamp> <LEVEL> <logger> <message>` format. Three log streams are
+worth grepping during a demo:
+
+| Stream          | Trigger                                                                  |
+| --------------- | ------------------------------------------------------------------------ |
+| `app.audit`     | `tick.enqueued`, `tick.done`, `tick.dead_letter`, `tick.fatal`           |
+| `app.coord`     | FSM transitions (`PENDING` -> `ACKNOWLEDGED` -> `RESOLVED`)               |
+| `app.analytics` | Historical-CTE cache hits, history failures, minute-boundary recomputes  |
+
+A useful one-liner during the demo:
+
+```bash
+docker logs -f <backend-container> 2>&1 | grep --line-buffered app.audit
+```
+
+### Run-time metric interpretation
+
+| Symptom                                  | First thing to check                                |
+| ---------------------------------------- | -------------------------------------------------- |
+| `processing_latency_ms.p95` spikes       | `tick_reliability` — likely a `VersionConflict`    |
+| `explanation_coverage < 1.0`             | An alert was opened before FSM initialised the row  |
+| `dead_letter_count` rises                | Provider drain exceeded available e-money           |
+| `historical_rows_scanned` near `row_cap` | Increase `HISTORICAL_WINDOW_DAYS` carefully, then  |
+|                                          | rebuild the supporting indexes                     |
+| `historical_cache_hits` near zero        | Sim clock is jumping minute boundaries too often   |
+
+---
+
+## Deployment diagram (Docker, CI/CD, production architecture)
+
+The repository ships its deployment topology as code. No deploy step
+relies on a personal machine's environment; everything below is
+reproducible from the committed files alone.
+
+### Container build — `backend/Dockerfile`
+
+The backend image is a multi-stage build:
+
+```text
++-----------------+   pip install --no-cache-dir    +-------------------------+
+| python:3.12-slim| -----------------------------> | runtime stage           |
+|   builder stage |   - requirements from           |   - non-root user       |
+|                 |     pyproject.toml              |   - tini as PID 1       |
+|                 |   - uv pip sync (locked)        |   - uvicorn entrypoint  |
++-----------------+                                +-------------------------+
+                                                              |
+                                                              v
+                                                  +-------------------------+
+                                                  | HEALTHCHECK /healthz    |
+                                                  | EXPOSE 8000             |
+                                                  | CMD uvicorn app.main    |
+                                                  +-------------------------+
+```
+
+The `render.yaml` Blueprint uses this Dockerfile as the
+`dockerConfig.dockerfilePath` for the web service.
+
+### CI/CD — GitHub Actions
+
+Three workflow files (one per responsibility) gate every push to
+`main`:
+
+```text
++--------------------+   +-----------------------------+   +---------------------------+
+| backend-ci.yml     |   | frontend-quality.yml        |   | backend-container.yml     |
+|                    |   |                             |   |                           |
+| - migrate twice    |   | - pnpm install --frozen-lock|   | - docker build backend    |
+| - pytest           |   | - tsc --noEmit              |   | - smoke test /healthz     |
+| - artifact upload  |   | - eslint                    |   | - GHCR push (cache only)  |
+|                    |   | - next build                |   |                           |
++--------------------+   +-----------------------------+   +---------------------------+
+            |                          |                              |
+            +--------------+-----------+--------------+---------------+
+                           |                          |
+                           v                          v
+                    +---------------------------------------------+
+                    | Branch protection: required checks on main   |
+                    |   - Backend tests and migrations             |
+                    |   - Frontend quality and production build    |
+                    |   - Backend container build                  |
+                    +---------------------------------------------+
+```
+
+Vercel and Render Git integrations create production deployments
+**only** for commits that pass all three required checks. A failing
+container build therefore blocks the backend deploy, and a failing
+type-check blocks the frontend deploy.
+
+### Production architecture — Render + Vercel + managed PostgreSQL
+
+```text
++------------------------+        /v1/* rewrite          +-----------------------------+
+| Vercel                 |  --------------------------> | Render                      |
+| liquiguard-frontend    |                              | liquiguard-backend          |
+| .vercel.app            |                              | .onrender.com               |
+|                        |                              |                             |
+| Next.js 16 + Turbopack |                              | FastAPI + uvicorn           |
+| Static + SSR pages     |                              | Docker container (Dockerfile)|
+| Theme + role store     |                              | /healthz + /health          |
+| SSE EventSource        |                              | SSE broadcaster (bounded)   |
++------------------------+                              +---------------+-------------+
+                                                                          |
+                                                                          | asyncpg (async)
+                                                                          v
+                                                          +-----------------------------+
+                                                          | Render managed PostgreSQL 16 |
+                                                          |                             |
+                                                          | shared + bkash + nagad +    |
+                                                          | rocket schemas + roles      |
+                                                          | Automatic backups           |
+                                                          +-----------------------------+
+```
+
+Key invariants the diagram enforces:
+
+- The browser **never** calls the backend cross-origin. The
+  `frontend/next.config.js` rewrite keeps `/v1/*` on the same origin
+  as the document, which sidesteps mixed-content and CORS preflight.
+- The backend has **one replica** by design. Queue capacity,
+  EWMA state, broadcaster deque, and the deterministic clock are all
+  process-local; scaling horizontally would split the watermark.
+- The four PostgreSQL application roles (`app_shared`, `app_bkash`,
+  `app_nagad`, `app_rocket`) are created during Blueprint provisioning.
+  Each connection in the application pool binds to one role and can
+  only touch the matching schema.
+
+### Per-environment configuration matrix
+
+| Setting                       | Local dev            | Render production      | Vercel (build-time only)    |
+| ----------------------------- | -------------------- | ---------------------- | --------------------------- |
+| `DATABASE_URL`                | localhost:5432       | Render internal URL    | n/a                         |
+| `DB_*_USER` / `DB_*_PASSWORD` | plaintext (dev)      | Render-generated secret| n/a                         |
+| `NEXT_PUBLIC_BACKEND_URL`     | n/a                  | n/a                    | `https://liquiguard-backend.onrender.com` |
+| `CORS_ALLOWED_ORIGINS`        | `http://localhost:3000` | exact Vercel origin | n/a                      |
+| `PORT`                        | 8000                 | Render `$PORT`         | n/a                         |
+| `HISTORICAL_WINDOW_DAYS`      | 30                   | 30 (default)           | n/a                         |
+| `SPEED_MULTIPLIER`            | 60                   | 60                     | n/a                         |
+
+Secrets are never committed. Render injects them at container start
+from its secret store; local development copies them from
+`backend/.env.example`.
+
+---
+
+## Database visualisation (ER diagram + historical data flow)
+
+The schema is intentionally small, role-separated, and append-mostly.
+Every row has a single owner; everything else is read by indexed scan.
+
+### Entity-relationship diagram
+
+```text
++-----------------------+         +----------------------------+
+| shared.shared_cash_    |         | shared.shared_cash_movement|
+|   ledger               |         |                            |
+|-----------------------|         |----------------------------|
+| PK  agent_id           |<--------| FK  agent_id               |
+|     balance NUMERIC    |  1..*   |     id BIGSERIAL           |
+|     version_id INT     |         | PK  sim_time TIMESTAMPTZ   |
+|     updated_at         |         |     amount NUMERIC(14,2)   |
++-----------------------+         |     direction (in/out)     |
+                                  |     provider_id            |
+                                  +----------------------------+
+                                            |
+                                            | (analytical view)
+                                            v
++----------------------------+      +----------------------------+
+| shared.provider_customer_  |      | shared.simulation_events    |
+|   journal                  |      |----------------------------|
+|----------------------------|      | PK  id BIGSERIAL           |
+| PK  transaction_id UUID    |      |     event_type TEXT        |
+|     agent_id               |      |     tick_id UUID           |
+|     provider_id            |      |     payload JSONB          |
+|     account_id             |      |     sim_time TIMESTAMPTZ   |
+|     amount NUMERIC(14,2)   |      |     created_at TIMESTAMPTZ |
+|     sim_time TIMESTAMPTZ   |      +----------------------------+
++----------------------------+               |
+        |                                     | (terminal status mirror)
+        | FK provider_id                      v
+        v                            +---------------------------+
++---------------------------+        | shared.coordination_alerts|
+| <provider>.provider_       |        |---------------------------|
+|   balance                  |        | PK  alert_id UUID         |
+|---------------------------|        |     status FSM TEXT       |
+| PK  provider_id           |        |     severity TEXT         |
+|     balance NUMERIC(14,2) |        |     transitions JSONB     |
+|     version_id INT        |        |     opened_at             |
+|     updated_at            |        |     resolved_at           |
++---------------------------+        +---------------------------+
+        |
+        | (per-provider journal)
+        v
++---------------------------+
+| <provider>.provider_txn    |
+|---------------------------|
+| PK  id BIGSERIAL           |
+|     provider_id            |
+|     transaction_id UUID FK |
+|     counterparty_account   |
+|     amount NUMERIC(14,2)   |
+|     sim_time TIMESTAMPTZ   |
++---------------------------+
+```
+
+Cardinality rules (enforced by `001_init.sql` and `002_hardening.sql`):
+
+- One `shared_cash_ledger` row per `agent_id`; many
+  `shared_cash_movement` rows referencing it.
+- One provider row in `<provider>.provider_balance` per provider id;
+  many `<provider>.provider_txn` rows referencing it.
+- `shared.provider_customer_journal.transaction_id` is the
+  cross-schema idempotency key. The same UUID links the shared-cash
+  leg and the provider e-money leg inside one atomic transaction.
+- `shared.simulation_events` is append-only; no FK constraints so
+  inserts never block on a row the simulation engine has not yet
+  written.
+- `shared.coordination_alerts.transitions` is an append-only JSON
+  array (`{from, to, at, by, reason}`). The current state is the
+  last element.
+
+### Historical data flow — how a 60-day read becomes a forecast
+
+The 60-day context layer never reads in-memory state; it always
+re-derives from durable rows.
+
+```text
++-------------------------+        +-------------------------+        +-----------------------+
+| tick.done (ledger       |        | shared.simulation_events|        | historical CTEs       |
+| commit completes)       |  -->   | append-only log         |  -->   | (60-day range scan)   |
++-------------------------+        +-------------------------+        +-----------+-----------+
+                                                                                |
+                                                                                v
+                                                                    +-------------------------+
+                                                                    | _forecast_payload()     |
+                                                                    | (cache keyed on         |
+                                                                    |  agent_id + minute)     |
+                                                                    +-----------+-------------+
+                                                                                |
+                                                                                v
+                                                                    +-------------------------+
+                                                                    | enrich_forecast()       |
+                                                                    | live EWMA confidence +  |
+                                                                    | historical similarity   |
+                                                                    +-----------+-------------+
+                                                                                |
+                                                                                v
+                                                                    +-------------------------+
+                                                                    | SSE snapshot +          |
+                                                                    | forecast_payload event  |
+                                                                    +-------------------------+
+```
+
+Three properties this flow guarantees:
+
+1. **Live and historical are decoupled** — the historical CTE runs only
+   on `operational_snapshot()` and `_forecast_payload()`; a failure in
+   the CTE cannot interrupt the live 12-minute EWMA, which runs inside
+   the same critical section as the ledger write.
+2. **One minute = one query** — `_historical.context()` keys its
+   in-memory cache as `(agent_id, days, int(as_of.timestamp() // 60))`.
+   Within the same simulated minute, repeated lookups return the cached
+   aggregation without re-entering the database.
+3. **Bounded cost** — every aggregation is capped at
+   `LIMIT :row_cap` (500,000 rows). A long-lived production deployment
+   cannot blow memory from the historical path.
+
+### Index inventory
+
+| Table                                | Index                                                          | Used by                                      |
+| ------------------------------------ | -------------------------------------------------------------- | -------------------------------------------- |
+| `shared.shared_cash_movement`        | `(agent_id, sim_time DESC, id DESC)`                           | Live EWMA + 60-day CTE                       |
+| `shared.provider_customer_journal`   | `(agent_id, provider_id, sim_time DESC)`                       | Provider-level historical aggregation        |
+| `<provider>.provider_txn`            | `(provider_id, sim_time DESC)`                                 | Provider drain estimation                    |
+| `shared.coordination_alerts`         | `(status, opened_at DESC)`                                     | Coordination cockpit list view               |
+| `shared.simulation_events`           | `(sim_time DESC)` + `(event_type, sim_time DESC)`              | Replay from watermark + filterable history   |
+| `shared.dead_letter_logs`            | `(created_at DESC)`                                            | Operator dead-letter inspection              |
+
+The indexes match the only queries that actually run. There is no
+generic "search everything" path, which is why each query stays inside
+an index range scan regardless of table size.
+
+---
+
 ## 1. Comprehensive Architecture Diagram & Specification
 
 LiquiGuard is built as a **layered, deterministically-clocked, write-ahead** stack. Every component on the left produces durable rows that downstream layers index and aggregate; every component on the right is a pure read or render path that can never block a ledger commit.
